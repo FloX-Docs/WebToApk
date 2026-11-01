@@ -1,0 +1,11 @@
+{
+  "name": "flox-apk-builder",
+  "version": "1.0.0",
+  "description": "FloX Android Web2APK Builder",
+  "main": "builder/build.js",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node builder/build.js"
+  },
+  "dependencies": {}
+}
