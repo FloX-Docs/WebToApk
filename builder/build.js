@@ -1,16 +1,132 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 
 const {
   templateDir,
+  workDir,
   outputDir
 } = require("./config");
 
-function cleanName(value) {
+function cleanFilename(value) {
+
   return String(value || "")
     .trim()
-    .replace(/[^a-zA-Z0-9_-]/g, "");
+    .replace(
+      /[^a-zA-Z0-9_-]/g,
+      ""
+    );
+}
+
+function escapeXml(value) {
+
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function escapeJava(value) {
+
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, "")
+    .replace(/\n/g, "\\n");
+}
+
+function copyDirectory(source, destination) {
+
+  fs.cpSync(
+    source,
+    destination,
+    {
+      recursive: true
+    }
+  );
+}
+
+function replaceInFile(
+  file,
+  replacements
+) {
+
+  let content =
+    fs.readFileSync(
+      file,
+      "utf8"
+    );
+
+  for (
+    const [key, value]
+    of Object.entries(replacements)
+  ) {
+
+    content =
+      content.replaceAll(
+        key,
+        value
+      );
+  }
+
+  fs.writeFileSync(
+    file,
+    content
+  );
+}
+
+function prepareIcon(
+  photoPath,
+  projectDir
+) {
+
+  if (!photoPath) {
+    return;
+  }
+
+  if (
+    !fs.existsSync(photoPath)
+  ) {
+    throw new Error(
+      "File foto tidak ditemukan"
+    );
+  }
+
+  /*
+   * Untuk tahap pertama kita simpan
+   * foto sebagai resource drawable.
+   *
+   * Icon launcher bisa kita tingkatkan
+   * ke adaptive icon pada tahap berikutnya.
+   */
+
+  const drawableDir =
+    path.join(
+      projectDir,
+      "app",
+      "src",
+      "main",
+      "res",
+      "drawable"
+    );
+
+  fs.mkdirSync(
+    drawableDir,
+    {
+      recursive: true
+    }
+  );
+
+  fs.copyFileSync(
+    photoPath,
+    path.join(
+      drawableDir,
+      "flox_icon.png"
+    )
+  );
 }
 
 function buildAPK({
@@ -19,133 +135,210 @@ function buildAPK({
   filename,
   appName
 }) {
-  if (!websiteUrl) {
+
+  if (
+    !websiteUrl ||
+    !websiteUrl.trim()
+  ) {
+
     throw new Error(
       "URL Website Tidak Boleh Kosong"
     );
   }
 
   if (!photoPath) {
+
     throw new Error(
       "Hanya Menerima Foto Bukan URL"
     );
   }
 
-  if (!filename || !filename.trim()) {
+  if (
+    !filename ||
+    !filename.trim()
+  ) {
+
     throw new Error(
       "Nama File Tidak Boleh Kosong"
     );
   }
 
-  if (!appName || !appName.trim()) {
+  if (
+    !appName ||
+    !appName.trim()
+  ) {
+
     throw new Error(
       "Nama Aplikasi Tidak Boleh Kosong"
     );
   }
 
-  const safeFilename = cleanName(filename);
+  const safeFilename =
+    cleanFilename(filename);
 
   if (!safeFilename) {
+
     throw new Error(
       "Nama File Tidak Boleh Kosong"
     );
   }
 
-  const workDir = path.join(
-    outputDir,
-    `${Date.now()}-${safeFilename}`
-  );
-
-  fs.mkdirSync(workDir, {
-    recursive: true
-  });
-
-  fs.cpSync(
-    templateDir,
+  fs.mkdirSync(
     workDir,
     {
       recursive: true
     }
   );
 
-  /*
-   * Nanti di sini:
-   *
-   * 1. websiteUrl dimasukkan ke WebView
-   * 2. photoPath dijadikan icon APK
-   * 3. appName dimasukkan ke strings.xml
-   * 4. Gradle menjalankan build APK
-   */
-
-  const stringsFile = path.join(
-    workDir,
-    "app",
-    "src",
-    "main",
-    "res",
-    "values",
-    "strings.xml"
+  fs.mkdirSync(
+    outputDir,
+    {
+      recursive: true
+    }
   );
 
-  let strings = fs.readFileSync(
-    stringsFile,
-    "utf8"
-  );
+  const id =
+    crypto
+      .randomBytes(8)
+      .toString("hex");
 
-  strings = strings
-    .replace(
-      "{{APP_NAME}}",
-      appName.trim()
-    )
-    .replace(
-      "{{WEBSITE_URL}}",
-      websiteUrl.trim()
+  const projectDir =
+    path.join(
+      workDir,
+      `${id}-${safeFilename}`
     );
 
-  fs.writeFileSync(
-    stringsFile,
-    strings
+  copyDirectory(
+    templateDir,
+    projectDir
   );
 
-  const gradlew = path.join(
-    workDir,
-    process.platform === "win32"
-      ? "gradlew.bat"
-      : "gradlew"
+  const stringsFile =
+    path.join(
+      projectDir,
+      "app",
+      "src",
+      "main",
+      "res",
+      "values",
+      "strings.xml"
+    );
+
+  replaceInFile(
+    stringsFile,
+    {
+      "{{APP_NAME}}":
+        escapeXml(
+          appName.trim()
+        )
+    }
+  );
+
+  const activityFile =
+    path.join(
+      projectDir,
+      "app",
+      "src",
+      "main",
+      "java",
+      "com",
+      "flox",
+      "web2apk",
+      "MainActivity.java"
+    );
+
+  replaceInFile(
+    activityFile,
+    {
+      "{{WEBSITE_URL}}":
+        escapeJava(
+          websiteUrl.trim()
+        )
+    }
+  );
+
+  prepareIcon(
+    photoPath,
+    projectDir
+  );
+
+  const gradlew =
+    path.join(
+      projectDir,
+      "gradlew"
+    );
+
+  if (
+    !fs.existsSync(gradlew)
+  ) {
+
+    throw new Error(
+      "gradlew tidak ditemukan di template"
+    );
+  }
+
+  fs.chmodSync(
+    gradlew,
+    0o755
+  );
+
+  console.log(
+    "Memulai Gradle build..."
   );
 
   execFileSync(
     gradlew,
-    ["assembleRelease"],
+    [
+      "assembleRelease",
+      "--no-daemon"
+    ],
     {
-      cwd: workDir,
+      cwd: projectDir,
       stdio: "inherit"
     }
   );
 
-  const apkSource = path.join(
-    workDir,
-    "app",
-    "build",
-    "outputs",
-    "apk",
-    "release",
-    "app-release.apk"
-  );
+  const generatedAPK =
+    path.join(
+      projectDir,
+      "app",
+      "build",
+      "outputs",
+      "apk",
+      "release",
+      "app-release.apk"
+    );
 
-  const apkOutput = path.join(
-    outputDir,
-    `${safeFilename}.apk`
-  );
+  if (
+    !fs.existsSync(generatedAPK)
+  ) {
+
+    throw new Error(
+      "APK tidak berhasil dibuat"
+    );
+  }
+
+  const finalAPK =
+    path.join(
+      outputDir,
+      `${safeFilename}.apk`
+    );
 
   fs.copyFileSync(
-    apkSource,
-    apkOutput
+    generatedAPK,
+    finalAPK
+  );
+
+  console.log(
+    `APK berhasil dibuat: ${finalAPK}`
   );
 
   return {
-    filename: `${safeFilename}.apk`,
-    path: apkOutput
+    filename:
+      `${safeFilename}.apk`,
+
+    path:
+      finalAPK
   };
 }
 
